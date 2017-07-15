@@ -11,9 +11,66 @@ import CIconv
 
 public class InputStreamReader: InputStream {
     
-    public enum Encoding: String {
-        case utf8 = "UTF-8"
-        case shiftJIS = "SHIFT_JIS"
+    public enum Encoding: CustomStringConvertible {
+        
+        case utf8
+        case utf16BE
+        case utf16LE
+        case utf32BE
+        case utf32LE
+        case custom(String)
+        
+        public var description: String {
+            switch self {
+            case .utf8:             return "UTF-8"
+            case .utf16BE:          return "UTF-16BE"
+            case .utf16LE:          return "UTF-16LE"
+            case .utf32BE:          return "UTF-32BE"
+            case .utf32LE:          return "UTF-32LE"
+            case .custom(let str):  return str
+            }
+        }
+        
+    }
+
+    public struct CodePage: RawRepresentable, CustomStringConvertible {
+        
+        private static var cpTable: Set<Int>?
+        private static let cpRegex = try! NSRegularExpression(pattern: "^CP(\\d+)$")
+        
+        public let rawValue: Int
+        
+        public init?(rawValue: Int) {
+            if CodePage.cpTable == nil {
+                CodePage.cpTable = Set<Int>()
+                iconvlist({ (count, names, _) -> Int32 in
+                    for i in 0 ..< Int(count) {
+                        let name = String(cString: names![i]!)
+                        let nameRange = NSRange(location: 0, length: name.utf16.count)
+                        let m = CodePage.cpRegex.firstMatch(in: name, range: nameRange)
+                        if let r = m?.rangeAt(1) {
+                            let substr: String.UTF16View = name.utf16
+                                .dropFirst(r.location)
+                                .prefix(r.length)
+                            let num = String(substr)!
+                            CodePage.cpTable!.insert(Int(num)!)
+                        }
+                    }
+                    return 0
+                }, nil)
+            }
+
+            guard CodePage.cpTable!.contains(rawValue) else {
+                return nil
+            }
+            
+            self.rawValue = rawValue
+        }
+        
+        public var description: String {
+            return "CP\(rawValue)"
+        }
+        
     }
     
     private let innerSteram: InputStream
@@ -27,7 +84,7 @@ public class InputStreamReader: InputStream {
     
     public init(_ stream: InputStream, fromCode: Encoding = .utf8, toCode: Encoding = .utf8, bufferSize: Int = 1024, leaveOpen: Bool = false) {
         self.innerSteram = stream
-        self.cd = iconv_open(toCode.rawValue, fromCode.rawValue)
+        self.cd = iconv_open(toCode.description, fromCode.description)
         self.inBuffer = malloc(bufferSize).assumingMemoryBound(to: UInt8.self)
         self.inBufferSize = bufferSize
         self.leaveOpen = leaveOpen
