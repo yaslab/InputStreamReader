@@ -9,68 +9,58 @@
 import Foundation
 import CIconv
 
-public class InputStreamReader: InputStream {
+public class InternationalizationConversion {
     
-    public enum Encoding: CustomStringConvertible {
-        
-        case utf8
-        case utf16BE
-        case utf16LE
-        case utf32BE
-        case utf32LE
-        case custom(String)
-        
-        public var description: String {
-            switch self {
-            case .utf8:             return "UTF-8"
-            case .utf16BE:          return "UTF-16BE"
-            case .utf16LE:          return "UTF-16LE"
-            case .utf32BE:          return "UTF-32BE"
-            case .utf32LE:          return "UTF-32LE"
-            case .custom(let str):  return str
+}
+
+private var codePageTable: Set<Int>? = nil
+private let codePageRegex = try! NSRegularExpression(pattern: "^CP(\\d+)$")
+
+private func makeCodePageTable() {
+    codePageTable = Set<Int>()
+    iconvlist({ (count, names, _) -> Int32 in
+        for i in 0 ..< Int(count) {
+            let name = String(cString: names![i]!)
+            let nameRange = NSRange(location: 0, length: name.utf16.count)
+            let m = codePageRegex.firstMatch(in: name, range: nameRange)
+            if let r = m?.rangeAt(1) {
+                let substr: String.UTF16View = name.utf16
+                    .dropFirst(r.location)
+                    .prefix(r.length)
+                let num = String(substr)!
+                codePageTable!.insert(Int(num)!)
             }
         }
-        
-    }
+        return 0
+    }, nil)
+}
 
-    public struct CodePage: RawRepresentable, CustomStringConvertible {
+public class InputStreamReader: InputStream {
+    
+    public struct Encoding: RawRepresentable {
         
-        private static var cpTable: Set<Int>?
-        private static let cpRegex = try! NSRegularExpression(pattern: "^CP(\\d+)$")
-        
-        public let rawValue: Int
-        
-        public init?(rawValue: Int) {
-            if CodePage.cpTable == nil {
-                CodePage.cpTable = Set<Int>()
-                iconvlist({ (count, names, _) -> Int32 in
-                    for i in 0 ..< Int(count) {
-                        let name = String(cString: names![i]!)
-                        let nameRange = NSRange(location: 0, length: name.utf16.count)
-                        let m = CodePage.cpRegex.firstMatch(in: name, range: nameRange)
-                        if let r = m?.rangeAt(1) {
-                            let substr: String.UTF16View = name.utf16
-                                .dropFirst(r.location)
-                                .prefix(r.length)
-                            let num = String(substr)!
-                            CodePage.cpTable!.insert(Int(num)!)
-                        }
-                    }
-                    return 0
-                }, nil)
-            }
+        public let rawValue: String
 
-            guard CodePage.cpTable!.contains(rawValue) else {
-                return nil
-            }
-            
+        public init(rawValue: String) {
             self.rawValue = rawValue
         }
         
-        public var description: String {
-            return "CP\(rawValue)"
+        public init?(codePage: Int) {
+            if codePageTable == nil {
+                makeCodePageTable()
+            }
+            guard codePageTable!.contains(codePage) else {
+                return nil
+            }
+            self.rawValue = "CP\(codePage)"
         }
         
+        public static let utf8      = Encoding(rawValue: "UTF-8")
+        public static let utf16BE   = Encoding(rawValue: "UTF-16BE")
+        public static let utf16LE   = Encoding(rawValue: "UTF-16LE")
+        public static let utf32BE   = Encoding(rawValue: "UTF-32BE")
+        public static let utf32LE   = Encoding(rawValue: "UTF-32LE")
+
     }
     
     private let innerSteram: InputStream
@@ -82,9 +72,12 @@ public class InputStreamReader: InputStream {
     
     private let leaveOpen: Bool
     
-    public init(_ stream: InputStream, fromCode: Encoding = .utf8, toCode: Encoding = .utf8, bufferSize: Int = 1024, leaveOpen: Bool = false) {
+    public init?(stream: InputStream, from: Encoding = .utf8, to: Encoding = .utf8, bufferSize: Int = 1024, leaveOpen: Bool = false) {
         self.innerSteram = stream
-        self.cd = iconv_open(toCode.description, fromCode.description)
+        self.cd = iconv_open(to.rawValue, from.rawValue)
+        if self.cd == iconv_t(bitPattern: -1) {
+            return nil
+        }
         self.inBuffer = malloc(bufferSize).assumingMemoryBound(to: UInt8.self)
         self.inBufferSize = bufferSize
         self.leaveOpen = leaveOpen
