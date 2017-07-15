@@ -9,10 +9,6 @@
 import Foundation
 import CIconv
 
-public class InternationalizationConversion {
-    
-}
-
 private var codePageTable: Set<Int>? = nil
 private let codePageRegex = try! NSRegularExpression(pattern: "^CP(\\d+)$")
 
